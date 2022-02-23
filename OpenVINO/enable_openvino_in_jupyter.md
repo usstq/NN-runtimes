@@ -91,12 +91,13 @@ But so files installed by OpenVINO `make install` has no RPATH at all, we saw fo
 -- Set runtime path of "/home/hddl/openvino/build/install/runtime/lib/intel64/libopenvino_intel_cpu_plugin.so" to ""
 ```
 
-RPATH support in CMake is described in:
- - https://dev.my-gate.net/2021/08/04/understanding-rpath-with-cmake/
- - https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
+This is default cmake behaviour according to https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling#default-rpath-settings
 
 This can be fixed by adding CMAKE_INSTALL_RPATH:
 ```bash
 cmake -DCMAKE_INSTALL_RPATH=/home/hddl/openvino/build/install/runtime/3rdparty/tbb/lib:/home/hddl/openvino/build/install/runtime/3rdparty/hddl/lib:/home/hddl/openvino/build/install/runtime/lib/intel64 .
 ```
 
+RPATH support in CMake is described in:
+ - https://dev.my-gate.net/2021/08/04/understanding-rpath-with-cmake/
+ - https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
