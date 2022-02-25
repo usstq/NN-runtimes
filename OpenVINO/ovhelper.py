@@ -45,7 +45,7 @@ def print_model(model):
     olist = [out2name[i] for i in model.outputs]
     print("    return {}".format(",".join(olist)))
 
-def visualize_model(model, fontsize=12):
+def visualize_model(model, fontsize=12, filename=None):
     # create all nodes before edges
     g = Digraph("openvino models")
     node2name = {}
@@ -110,7 +110,10 @@ def visualize_model(model, fontsize=12):
                 label=label,
                 color='black',
                 fontsize=str(fontsize))
-    return Source(g, format="svg")
+    graph_src = Source(g, format="svg")
+    if filename:
+        return graph_src.render(filename)
+    return graph_src
 
 if __name__ == "__main__":
     pass
