@@ -33,12 +33,12 @@ def print_model(model):
             opname = friendly_name
             friendly_name = ""
 
-        print("    {} = {}({}{})".format(
+        print("    {} = {}({}{}) {}".format(
                         ",".join(returns),
                         opname,
                         ",".join(args),
                         "" if len(attrs) == 0 else ("," if len(args)>0 else "") + (",".join(attrs)),
-                        ))
+                        "" if len(friendly_name)==0 else "   # {}".format(friendly_name) ))
         if (rt_info):
             print("\t\t\t#rt_info:\n\t\t\t#\t{}\n".format("\n\t\t\t#\t".join(rt_info)))
 
