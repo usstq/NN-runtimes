@@ -118,11 +118,11 @@ def visualize_model(model, fontsize=12, filename=None):
 # for measuring CPU usage in separate process
 import psutil, time
 from multiprocessing import Process, Pipe
-def worker_process(conn):
+def worker_process(conn, percpu):
     cpu_usage = []
     while (not conn.poll()):
         time.sleep(0.1)
-        cpu_usage.append(psutil.cpu_percent(percpu=False))
+        cpu_usage.append(psutil.cpu_percent(percpu=percpu))
     conn.recv()
     conn.send(cpu_usage)
     conn.close()
@@ -131,8 +131,8 @@ class CPUUsage:
     def __init__(self) -> None:
         self.parent_conn, self.child_conn = Pipe()
 
-    def start(self):
-        self.p = Process(target=worker_process, args=(self.child_conn,))
+    def start(self, percpu=False):
+        self.p = Process(target=worker_process, args=(self.child_conn,percpu))
         self.p.start()
 
     def end(self):
