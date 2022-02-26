@@ -2,4 +2,5 @@ pandas
 numpy
 graphviz
 matplotlib
+psutil
 openvino
