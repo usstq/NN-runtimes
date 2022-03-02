@@ -101,3 +101,20 @@ cmake -DCMAKE_INSTALL_RPATH=/home/hddl/openvino/build/install/runtime/3rdparty/t
 RPATH support in CMake is described in:
  - https://dev.my-gate.net/2021/08/04/understanding-rpath-with-cmake/
  - https://gitlab.kitware.com/cmake/community/-/wikis/doc/cmake/RPATH-handling
+
+
+# Install POT
+
+install POT and its dependencies from openvino source tree (`editable` install works when you are not in the target folder):
+
+```bash
+python3 -m pip install --user -e ~/openvino/thirdparty/open_model_zoo/tools/accuracy_checker/
+python3 -m pip install --user -e ~/openvino/tools/mo/
+python3 -m pip install --user -e ~/openvino/tools/pot
+```
+
+run POT, since we use `--user` flag and `~/.local/bin` is not in PATH
+
+```bash
+~/.local/bin/pot -h
+```

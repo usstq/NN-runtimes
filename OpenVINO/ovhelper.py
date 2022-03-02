@@ -33,12 +33,19 @@ def print_model(model):
             opname = friendly_name
             friendly_name = ""
 
-        print("    {} = {}({}{}) {}".format(
+        comment = friendly_name
+        if opname.startswith("Constant"):
+            vstr = n.get_value_strings()
+            print("    {} = [{}]".format(
+                                    ",".join(returns),
+                                    ",".join(vstr[:16]) + (",..." if len(vstr)>16 else "")))
+        else:
+            print("    {} = {}({}{}) {}".format(
                         ",".join(returns),
                         opname,
                         ",".join(args),
                         "" if len(attrs) == 0 else ("," if len(args)>0 else "") + (",".join(attrs)),
-                        "" if len(friendly_name)==0 else "   # {}".format(friendly_name) ))
+                        "" if len(comment)==0 else "   # {}".format(comment) ))
         if (rt_info):
             print("\t\t\t#rt_info:\n\t\t\t#\t{}\n".format("\n\t\t\t#\t".join(rt_info)))
 
@@ -50,28 +57,29 @@ def visualize_model(model, fontsize=12, filename=None):
     g = Digraph("openvino models")
     node2name = {}
     nodenames = set()
-    op2color = {"Parameter":"gold", "Result":"deeppink", "Constant":"gray"}
+    op2color = {"Parameter":"gold", "Result":"deeppink", "Constant":"gray", "Const":"gray"}
     for n in model.get_ordered_ops():
-        opname = n.get_type_name()
         friendly_name = n.get_friendly_name()
         rt_info = n.get_rt_info()
+        type_name = n.get_type_name()
+        # ExecutionNode is fake wrapper of runtime node
+        # and this type name gives less information than friendly_name
+        if type_name == "ExecutionNode" and "layerType" in rt_info:
+            type_name = str(rt_info["layerType"])
+
         attrs = ["{}={}".format(k, v) for k,v in n.get_attributes().items()]
         rtinfo = ["{}={}".format(k, v) for k,v in rt_info.items()]
 
-        # ExecutionNode is fake wrapper of runtime node
-        # and this type name gives less information than friendly_name
-        if opname == "ExecutionNode":
-            opname = friendly_name
-        
-        # rt_info["layerType"] gives OP type information
-        if "layerType" in rt_info:
-            opname = rt_info["layerType"]
-
-        label = opname
-
         # originalLayersNames gives mapping between runtime nodes and orginal nodes
-        if "originalLayersNames" in rt_info:
-            label = "{"+opname+"|"+rt_info['originalLayersNames'].replace(",","|") +"}"
+        if (type_name == "Const") and ("Values" in rt_info):
+            label = rt_info["Values"]
+        elif "originalLayersNames" in rt_info:
+            label = "{"+type_name+"|"+rt_info['originalLayersNames'].replace(",","|") +"}"
+        elif type_name.startswith("Constant"):
+            vstr = n.get_value_strings()
+            label = ",".join(vstr[:8]) + (",..." if len(vstr)>8 else "")
+        else:
+            label = "{}\\n({}{})".format(type_name, friendly_name[:20], "..." if len(friendly_name)>20 else "")
 
         allinfo = friendly_name
         if (attrs):
@@ -79,7 +87,10 @@ def visualize_model(model, fontsize=12, filename=None):
         if (rt_info):
             allinfo += "\n----rt_info----\n{}".format("\n".join(rtinfo))
 
-        color = op2color[opname] if opname in op2color else "cyan"
+        if type_name.startswith("Constant"):
+            allinfo += "\n----values----\n{}".format(",".join(n.get_value_strings()))
+
+        color = op2color[type_name] if type_name in op2color else "cyan"
         g.node(name=friendly_name,
                 label=label,
                shape='Mrecord',
@@ -99,17 +110,17 @@ def visualize_model(model, fontsize=12, filename=None):
 
             label = '[{}]'.format(str_shape)
             if "outputLayouts" in src_rt_info:
-                label += " " + src_rt_info["outputLayouts"]
+                label += "\n" + src_rt_info["outputLayouts"]
             if "outputPrecisions" in src_rt_info:
-                label += " " + src_rt_info["outputPrecisions"]
+                label += "\n" + src_rt_info["outputPrecisions"]
             else:
-                label += " " + str_ele_type
+                label += "\n" + str_ele_type
             g.edge(
                 i.get_source_output().get_node().get_friendly_name(),
                 n.get_friendly_name(),
                 label=label,
                 color='black',
-                fontsize=str(fontsize))
+                fontsize=str(fontsize*8//10))
     graph_src = Source(g, format="svg")
     if filename:
         return graph_src.render(filename)
@@ -140,6 +151,23 @@ class CPUUsage:
         cpu_usage = self.parent_conn.recv()
         self.p.join()
         return cpu_usage
+
+# helper to dump model
+from openvino.runtime.passes import Manager
+import openvino.runtime as ov
+
+def serialize_model(self, model_path):
+    weight_path = model_path[:model_path.find(".xml")] + ".bin"
+    pass_manager = Manager()
+    pass_manager.register_pass("Serialize", model_path, weight_path)
+    pass_manager.run_passes(self)
+    return model_path, weight_path
+
+# https://stackoverflow.com/questions/47797661/python-types-methodtype
+# add serialize method
+ov.Model.serialize = serialize_model
+ov.Model.print = print_model
+ov.Model.visualize = visualize_model
 
 if __name__ == "__main__":
     pass

@@ -1,0 +1,30 @@
+{
+    "model": {
+        "model_name": "cnntest",    // Model name
+        "model": "./cnntest.xml",       // Path to model (.xml format)
+        "weights": "./cnntest.bin" // Path to weights (.bin format)
+    },
+    "engine": {
+        "type": "data_free",                  // Engine type​
+        "generate_data": "True",              // (Optional) If True, generate synthetic data and store to `data_source`​
+                                              // Otherwise, the dataset from `--data-source` will be used'​
+        "layout": "NCHW",                     // (Optional) Layout of input data. Supported: ["NCHW", "NHWC", "CHW", "CWH"]​
+        "data_type": "image"                 // (Optional) You can specify the type of data to be generated.​
+                                              // Currently only `image` is supported.​
+                                              // It is planned to add 'text` and 'audio' cases​
+    },
+    "compression": {
+        "algorithms": [
+            {
+                "name": "DefaultQuantization", // Optimization algorithm name
+                "params": {
+                    "preset": "performance",   // Preset [performance, mixed, accuracy] which control the quantization
+                                               // mode (symmetric, mixed (weights symmetric and activations asymmetric)
+                                               // and fully asymmetric respectively)
+                    "stat_subset_size": 300    // Size of subset to calculate activations statistics that can be used
+                                               // for quantization parameters calculation
+                }
+            }
+        ]
+    }
+}
