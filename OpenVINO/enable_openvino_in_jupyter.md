@@ -118,3 +118,11 @@ run POT, since we use `--user` flag and `~/.local/bin` is not in PATH
 ```bash
 ~/.local/bin/pot -h
 ```
+
+# Export ipynb to html
+
+`jupyter` executable is installed to `~/.local/bin/`
+
+```bash
+~/.local/bin/jupyter nbconvert --to html your_notebook_name.ipynb
+```
