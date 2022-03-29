@@ -147,20 +147,26 @@ def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
     if execTimeMcs_total > 0:
         num_limit = 10
         sort_execTimeMcs_by_type = []
+        acc_percentage = 0
         for (type_name, t) in sorted(execTimeMcs_by_type.items(), key=lambda x: x[1], reverse=True):
-            sort_execTimeMcs_by_type.append("{:>10}  {:.1f}%".format(type_name, t*100/execTimeMcs_total))
-            if len(sort_execTimeMcs_by_type) >= num_limit:
+            percentage = t*100/execTimeMcs_total
+            acc_percentage += percentage
+            sort_execTimeMcs_by_type.append("{:>10}  {:.1f}%  accumulated:{:.1f}%".format(type_name, percentage, acc_percentage))
+            if acc_percentage >= 80:
                 break
         
         sort_execTimeMcs_by_name = []
+        acc_percentage = 0
         for (n, t) in sorted(execTimeMcs_by_node.items(), key=lambda x: x[1], reverse=True):
             friendly_name = name_normalize(n)
             type_name = n.get_type_name()
             rt_info = n.get_rt_info()
             if type_name == "ExecutionNode" and "layerType" in rt_info:
                 type_name = str(rt_info["layerType"])
-            sort_execTimeMcs_by_name.append("{:>10}({})  {:.1f}%".format(friendly_name, type_name, t*100/execTimeMcs_total))
-            if len(sort_execTimeMcs_by_name) >= num_limit:
+            percentage = t*100/execTimeMcs_total
+            acc_percentage += percentage
+            sort_execTimeMcs_by_name.append("{:>10}({})  {:.1f}%   accumulated:{:.1f}%".format(friendly_name, type_name, percentage, acc_percentage))
+            if acc_percentage >= 80:
                 break
         
         kwargs = {"shape":'box',
@@ -313,7 +319,8 @@ def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
                     Strides = mem_rt_info["Strides"]
 
                     total_shape = np.array(BlockDims) + np.array(OffsetPaddingToData)
-                    new_array = part_array.reshape(total_shape)
+                    total_cnt = np.prod(total_shape)
+                    new_array = part_array[:total_cnt].reshape(total_shape)
 
                     nd_strides = np.array(new_array.strides)//ctypes.sizeof(c_type)
                     if (nd_strides != np.array(Strides)).any():
@@ -381,12 +388,23 @@ html_prefix ='''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
             cursor: -moz-grab;
             cursor: -webkit-grab;
         }
+
+        .search_li {
+            cursor: pointer;
+        }
+        .search_li:hover {
+            background-color: #ffffff;
+        }
     </style>
 </head>
 <body>
 <pre id="SearchPointer" style="position:absolute;z-index: 100;font-size:32px;color: #ff0000;">&starf;</pre>
-<div id="floatbar" style="position:fixed;top:20px;right: 10px;z-index: 100;">
-  <input type="text" id="SearchKey" placeholder="search here"> <button id="Search">Search</button>
+<div id="floatbar" style="position:fixed;top:20px;right: 10px;z-index: 100;background-color: #92cff3;border: 1px solid black;padding:5px;">
+    &#x1F50D;&#8239;<input type="text" id="SearchKey" placeholder="search here">&#8239;&crarr;<br>
+  <div style="max-height: 450px;overflow-y: auto;">
+  <ui id="SearchList">
+  </ui>
+  </div>
 </div>
 '''
 html_surfix='''
@@ -401,29 +419,45 @@ html_surfix='''
     SearchKey = document.querySelector("#SearchKey")
     Search = document.querySelector("#Search")
     SearchPointer = document.querySelector("#SearchPointer")
-    SearchGIndex = 0
-    Search.onclick = function (ev){
+    SearchList = document.querySelector("#SearchList")
+    SearchKey.onkeyup = function (ev){
         keyStr = SearchKey.value
+        if (keyStr == "") {
+            SearchList.innerHTML = ""
+            return
+        }
+        if (event.keyCode !== 13) return
+        SearchList.innerHTML = ""
         var elList = document.querySelectorAll('g');
-        for (i = SearchGIndex + 1; i < elList.length; i++) {
+        for (i = 0; i < elList.length; i++) {
             g = elList[i]
             if (g.classList.contains("graph")) continue;
             if (!(g.classList.contains("node"))) continue;
             a = g.querySelector("a")
             if (!a) continue
+            title = g.querySelector("title")
+            if (!title) continue
             tooltip_txt = a.getAttribute("xlink:title")
             if (!tooltip_txt) continue
             indexof = tooltip_txt.indexOf(keyStr)
             if (indexof >= 0) {
-                a.scrollIntoView()
+                li = document.createElement("li")
+                li.innerHTML = title.innerHTML
+                let target = { element: g };
+                li.setAttribute("class", "search_li");
                 var rect = g.getBoundingClientRect()
-                SearchPointer.style.top = rect.top + window.scrollY
-                SearchPointer.style.left = rect.left + window.scrollX
-                SearchGIndex = i
-                return
+                li.setAttribute("targetRect_x", rect.left +  window.scrollX)
+                li.setAttribute("targetRect_y", rect.top +  window.scrollY)
+                li.onclick = function() {
+                    var x = this.getAttribute("targetRect_x")
+                    var y = this.getAttribute("targetRect_y")
+                    window.scrollTo(x - window.innerWidth/2, y - window.innerHeight/2)
+                    SearchPointer.style.top = y
+                    SearchPointer.style.left = x
+                }
+                SearchList.appendChild(li)
             }
         }
-        SearchGIndex = 0
         return;
     }
     let infobar_on = null
