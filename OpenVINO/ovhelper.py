@@ -152,7 +152,7 @@ def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
             percentage = t*100/execTimeMcs_total
             acc_percentage += percentage
             sort_execTimeMcs_by_type.append("{:>10}  {:.1f}%  accumulated:{:.1f}%".format(type_name, percentage, acc_percentage))
-            if acc_percentage >= 80:
+            if acc_percentage >= 90 and len(sort_execTimeMcs_by_type) >= num_limit:
                 break
         
         sort_execTimeMcs_by_name = []
@@ -166,7 +166,7 @@ def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
             percentage = t*100/execTimeMcs_total
             acc_percentage += percentage
             sort_execTimeMcs_by_name.append("{:>10}({})  {:.1f}%   accumulated:{:.1f}%".format(friendly_name, type_name, percentage, acc_percentage))
-            if acc_percentage >= 80:
+            if acc_percentage >= 90 and len(sort_execTimeMcs_by_name) >= num_limit:
                 break
         
         kwargs = {"shape":'box',
@@ -550,7 +550,7 @@ html_surfix='''
 '''
 def visualize_model(model, fontsize=12, filename=None, detailed_label=False):
     g, data_map = generate_graph(model, fontsize, detailed_label=detailed_label)
-    graph_src = Source(g, format="svg")
+    graph_src = Source(g.source, format="svg")
     if filename:
         svg = graph_src.pipe().decode('utf-8')
         if filename.endswith(".html"):
@@ -686,6 +686,51 @@ def test2():
     compiled_model_quant.get_runtime_model().visualize(filename = "1.html")
     sys.exit(0)
 
+
+from openvino.runtime.utils.types import get_dtype
+def fill_tensors_with_random(input):
+    dtype = get_dtype(input.get_element_type())
+    rand_min, rand_max = (0, 1) if dtype == np.bool else (np.iinfo(np.uint8).min, np.iinfo(np.uint8).max)
+    # np.random.uniform excludes high: add 1 to have it generated
+    if np.dtype(dtype).kind in ['i', 'u', 'b']:
+        rand_max += 1
+    rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(0)))
+    shape = input.get_shape()
+    return ov.Tensor(rs.uniform(rand_min, rand_max, list(shape)).astype(dtype))
+
+def test_infer_queue(compiled_model, num_request, num_infer, time_limit=60):
+    infer_queue = ov.AsyncInferQueue(compiled_model, num_request)
+
+    all_input = {}
+    for port, input in enumerate(compiled_model.inputs):
+        print("{:<10} {} {}".format(input.get_any_name(), input.get_element_type(), input.get_shape()))
+        all_input[port] = fill_tensors_with_random(input)
+
+    latency_list = []
+    prof_list = []
+    def callback(request, userdata):
+        id = userdata
+        latency_list.append(request.latency)
+        prof_list.append(request.profiling_info)
+
+    infer_queue.set_callback(callback)
+    for i in range(num_request):
+        infer_queue.start_async(all_input, userdata=i)
+
+    t0 = time.time()
+    for i in range(num_infer):
+        wtime = time.time() - t0
+        if time_limit and (wtime > time_limit):
+            break
+        infer_queue.start_async(None, userdata=i)
+    infer_queue.wait_all()
+    fps = i/wtime
+    return latency_list, prof_list, fps, wtime
+
+    data = {}
+    for port, info in enumerate(app_input_info):
+        data[port] = fill_tensors_with_random(info)
+
 if __name__ == "__main__":
 
     #test2()
@@ -704,25 +749,40 @@ if __name__ == "__main__":
         OPT_LINENUM = os.environ["OPT_LINENUM"]
     else:
         OPT_LINENUM = ""
+
     device = "CPU"
     NUM_STREAMS = 1
     INFERENCE_NUM_THREADS = 1
 
-    core.set_property(device, {"PERF_COUNT": "YES"})
+    dev_prop = {"PERF_COUNT": "YES",
+                "AFFINITY": "CORE",
+                "PERFORMANCE_HINT_NUM_REQUESTS":0,
+                "PERFORMANCE_HINT":""}
     if (NUM_STREAMS):
-        core.set_property(device, {"NUM_STREAMS":NUM_STREAMS})
+        dev_prop["NUM_STREAMS"] = NUM_STREAMS
     if (INFERENCE_NUM_THREADS):
-        core.set_property(device, {"INFERENCE_NUM_THREADS":INFERENCE_NUM_THREADS})
+        dev_prop["INFERENCE_NUM_THREADS"] = INFERENCE_NUM_THREADS
 
+    core.set_property(device, dev_prop)
 
     compiled_model = core.compile_model(model, "CPU")
+
+    latency_list, prof_list, fps, wtime = test_infer_queue(compiled_model, 2, 200)
+    print(f"test_infer_queue FPS:{fps:.1f}")
+    '''
     all_input = {}
     for input in compiled_model.inputs:
-        all_input[input] = ov.Tensor(input.get_element_type(), input.get_shape())
-    
-    for i in range(10):
-        compiled_model.infer_new_request(all_input)
-
+        print("{:<10} {} {}".format(input.get_any_name(), input.get_element_type(), input.get_shape()))
+        all_input[input] = fill_tensors_with_random(input)
+    req = compiled_model.create_infer_request()
+    req.infer(inputs=all_input)
+    frames = 10
+    t0 = time.time()
+    for i in range(frames):
+        req.infer()
+    t1 = time.time()
+    print(f"FPS:{frames/(t1 - t0):.1f}")
+    '''
     dest_file = filename="{}_{}.html".format(model_path, OPT_LINENUM)
     compiled_model.get_runtime_model().visualize(filename=dest_file)
     print("{} is saved!".format(dest_file))
