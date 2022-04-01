@@ -7,36 +7,60 @@ from graphviz import Digraph, Source
 import ctypes, re
 
 # print Model in readable text
-def print_model(model, show_rt_info = False):
+def generate_str(model, show_rt_info = False):
     out2name = {}
     nameid = 1
     simpleconst_node2vstr = {}
     ilist = [i.get_node().get_name() for i in model.inputs]
-    print("model({}):".format(",".join(ilist)))
+    result = []
+    def get_rt_info(n):
+        return {k:str(v) for k,v in n.get_rt_info().items()}
+    result.append("model({}):".format(",".join(ilist)))
     for n in model.get_ordered_ops():
         # collect output and also allocate output names
-        out_types = []
-        varname = "t{}".format(nameid)
-        nameid += 1
-        num_out = len(n.outputs())
-        for k, out in enumerate(n.outputs()):
-            out_types.append("Tensor<{}x{}>".format(
-                                "x".join([str(s) for s in out.get_shape()]),
-                                out.get_element_type().get_type_name()))
-            out2name[out] = varname if num_out == 1 else "{}[{}]".format(varname, k)
-
-        #out_types
-        str_out_types = out_types[0] if len(out_types)==1 else "tuple({})".format(",".join(out_types))
-        str_output = "{} {}".format(str_out_types, varname)
-    
-        # collect source output names of corresponding inputs
-        args = []
-        for i in n.inputs():
-            o = i.get_source_output()
-            if o in simpleconst_node2vstr:
-                args.append(simpleconst_node2vstr[o])
+        rt_info = get_rt_info(n)
+        if "reginfo" in rt_info or "effectiveAddress" in rt_info:
+            if "reginfo" in rt_info:
+                varname = "vmm{}".format(rt_info["reginfo"])
             else:
-                args.append(out2name[o])
+                varname = "t{}".format(nameid)
+                nameid += 1
+            str_output = varname
+            args = []
+            if "effectiveAddress" in rt_info:
+                args.append("[r{}]".format(rt_info["effectiveAddress"]))
+            for i in n.inputs():
+                r2 = get_rt_info(i.get_source_output().get_node())
+                if "reginfo" in r2:
+                    args.append("vmm{}".format(r2["reginfo"]))
+                else:
+                    args.append(out2name[i.get_source_output()])
+
+            for k, out in enumerate(n.outputs()):
+                out2name[out] = varname if num_out == 1 else "{}[{}]".format(varname, k)
+        else:
+            out_types = []
+            varname = "t{}".format(nameid)
+            nameid += 1
+            num_out = len(n.outputs())
+            for k, out in enumerate(n.outputs()):
+                out_types.append("Tensor<{}x{}>".format(
+                                    "x".join([str(s) for s in out.get_shape()]),
+                                    out.get_element_type().get_type_name()))
+                out2name[out] = varname if num_out == 1 else "{}[{}]".format(varname, k)
+
+            #out_types
+            str_out_types = out_types[0] if len(out_types)==1 else "tuple({})".format(",".join(out_types))
+            str_output = "{} {}".format(str_out_types, varname)
+        
+            # collect source output names of corresponding inputs
+            args = []
+            for i in n.inputs():
+                o = i.get_source_output()
+                if o in simpleconst_node2vstr:
+                    args.append(simpleconst_node2vstr[o])
+                else:
+                    args.append(out2name[o])
 
         # generate psuedo code
         type_name = n.get_type_name()
@@ -54,23 +78,27 @@ def print_model(model, show_rt_info = False):
             if len(vstr) <= 8:
                 simpleconst_node2vstr[n.outputs()[0]] = "[{}]".format(",".join(vstr))
             else:
-                print("    {} = {}([{}]) {}".format(
+                result.append("    {} = {}([{}]) {}".format(
                                     str_output,
                                     type_name,
                                     ",".join(vstr[:16]) + (",..." if len(vstr)>16 else ""),
                                     comment))
         else:
-            print("    {} = {}({}{}) {}".format(
+            result.append("    {} = {}({}{}) {}".format(
                         str_output,
                         type_name,
                         ",".join(args),
                         "" if len(attrs) == 0 else ("," if len(args)>0 else "") + (",".join(attrs)),
                         comment ))
         if (show_rt_info and rtinfo):
-            print("\t\t\t#rt_info:\n\t\t\t#\t{}\n".format("\n\t\t\t#\t".join(rtinfo)))
+            result.append("\t\t\t#rt_info:\n\t\t\t#\t{}\n".format("\n\t\t\t#\t".join(rtinfo)))
 
     olist = [out2name[i] for i in model.outputs]
-    print("    return {}".format(",".join(olist)))
+    result.append("    return {}".format(",".join(olist)))
+    return "\n".join(result)
+
+def print_model(model, show_rt_info = False):
+    print(generate_str(model, show_rt_info))
 
 def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
     # create all nodes before edges
@@ -117,7 +145,10 @@ def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
         # add input id if it's input node of the model
         if n in inode2index:
             name += "_#{}".format(inode2index[n])
-        return graph_name + "_" + name.replace("<","(").replace(">",")")
+        name = name.replace("<","(").replace(">",")").replace(":","_")
+        if len(graph_name):
+            return '{}'.format(graph_name, name)
+        return '{}'.format(name)
 
     # statistics on execTime
     execTimeMcs_total = 0
@@ -240,6 +271,7 @@ def generate_graph(model, fontsize=12, graph_name="", detailed_label=False):
         color = op2color[type_name] if type_name in op2color else "cyan"
         if type_name == "Subgraph":
             submodel = rt_info["body"]
+            allinfo += "\n----model-----\n{}".format(generate_str(submodel))
             data_map[friendly_name] = submodel
 
         if detailed_label:
@@ -398,7 +430,7 @@ html_prefix ='''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
     </style>
 </head>
 <body>
-<pre id="SearchPointer" style="position:absolute;z-index: 100;font-size:32px;color: #ff0000;">&starf;</pre>
+<pre id="SearchPointer" style="position:absolute;z-index: 100;font-size:32px;color: #ff0000;pointer-events: none;">&starf;</pre>
 <div id="floatbar" style="position:fixed;top:20px;right: 10px;z-index: 100;background-color: #92cff3;border: 1px solid black;padding:5px;">
     &#x1F50D;&#8239;<input type="text" id="SearchKey" placeholder="search here">&#8239;&crarr;<br>
   <div style="max-height: 450px;overflow-y: auto;">
@@ -439,7 +471,7 @@ html_surfix='''
             if (!title) continue
             tooltip_txt = a.getAttribute("xlink:title")
             if (!tooltip_txt) continue
-            indexof = tooltip_txt.indexOf(keyStr)
+            indexof = tooltip_txt.toLowerCase().indexOf(keyStr.toLowerCase())
             if (indexof >= 0) {
                 li = document.createElement("li")
                 li.innerHTML = title.innerHTML
@@ -688,7 +720,7 @@ def test2():
 
 
 from openvino.runtime.utils.types import get_dtype
-def fill_tensors_with_random(input):
+def fill_tensors_with_random(input, alpha=0):
     dtype = get_dtype(input.get_element_type())
     rand_min, rand_max = (0, 1) if dtype == np.bool else (np.iinfo(np.uint8).min, np.iinfo(np.uint8).max)
     # np.random.uniform excludes high: add 1 to have it generated
@@ -696,24 +728,26 @@ def fill_tensors_with_random(input):
         rand_max += 1
     rs = np.random.RandomState(np.random.MT19937(np.random.SeedSequence(0)))
     shape = input.get_shape()
-    return ov.Tensor(rs.uniform(rand_min, rand_max, list(shape)).astype(dtype))
+    a = rs.uniform(rand_min, rand_max, list(shape)).astype(dtype)
+    b = rs.uniform(rand_min, rand_max, list(shape)).astype(dtype)
+    return ov.Tensor(a*alpha + b *(1-alpha))
 
 def test_infer_queue(compiled_model, num_request, num_infer, time_limit=60):
     infer_queue = ov.AsyncInferQueue(compiled_model, num_request)
 
-    all_input = {}
-    for port, input in enumerate(compiled_model.inputs):
-        print("{:<10} {} {}".format(input.get_any_name(), input.get_element_type(), input.get_shape()))
-        all_input[port] = fill_tensors_with_random(input)
-
     latency_list = []
     prof_list = []
     def callback(request, userdata):
-        id = userdata
         latency_list.append(request.latency)
         prof_list.append(request.profiling_info)
 
     infer_queue.set_callback(callback)
+
+    all_input = {}
+    for port, input in enumerate(compiled_model.inputs):
+        print("input[{}]  {:<10} {} {}".format(port, input.get_any_name(), input.get_element_type(), input.get_shape()))
+        all_input[port] = fill_tensors_with_random(input)
+
     for i in range(num_request):
         infer_queue.start_async(all_input, userdata=i)
 
@@ -726,10 +760,6 @@ def test_infer_queue(compiled_model, num_request, num_infer, time_limit=60):
     infer_queue.wait_all()
     fps = i/wtime
     return latency_list, prof_list, fps, wtime
-
-    data = {}
-    for port, info in enumerate(app_input_info):
-        data[port] = fill_tensors_with_random(info)
 
 if __name__ == "__main__":
 
@@ -767,22 +797,25 @@ if __name__ == "__main__":
 
     compiled_model = core.compile_model(model, "CPU")
 
-    latency_list, prof_list, fps, wtime = test_infer_queue(compiled_model, 2, 200)
-    print(f"test_infer_queue FPS:{fps:.1f}")
     '''
-    all_input = {}
-    for input in compiled_model.inputs:
-        print("{:<10} {} {}".format(input.get_any_name(), input.get_element_type(), input.get_shape()))
-        all_input[input] = fill_tensors_with_random(input)
     req = compiled_model.create_infer_request()
-    req.infer(inputs=all_input)
-    frames = 10
-    t0 = time.time()
-    for i in range(frames):
-        req.infer()
-    t1 = time.time()
-    print(f"FPS:{frames/(t1 - t0):.1f}")
+    for i in range(100):
+        a = i*0.25 - 1
+        all_input = {}
+        for input in compiled_model.inputs:
+            print("{:<10} {} {}".format(input.get_any_name(), input.get_element_type(), input.get_shape()))
+            all_input[input] = fill_tensors_with_random(input, a)
+        req.infer(inputs=all_input)
+        print(a)
+        from PIL import Image
+        im = Image.fromarray(req.output_tensors[0].data.squeeze().astype(np.uint8))
+        im.save("your_file_{}.png".format(a))
+        if (a > 1.6):
+            sys.exit(0) 
     '''
+    latency_list, prof_list, fps, wtime = test_infer_queue(compiled_model, 2, 20000, time_limit=10)
+    print(f"test_infer_queue FPS:{fps:.1f}")
+
     dest_file = filename="{}_{}.html".format(model_path, OPT_LINENUM)
     compiled_model.get_runtime_model().visualize(filename=dest_file)
     print("{} is saved!".format(dest_file))
